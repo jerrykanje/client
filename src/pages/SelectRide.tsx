@@ -158,21 +158,23 @@ export const SelectRide: React.FC<SelectRideProps> = ({
     }
   }, [navPickup, pickup, navDestination, destination, navStops, stops, pickupCoords, destinationCoords, serviceType, extraOption]);
 
-  // Fetch on mount - SINGLE API CALL
+  // Ref to prevent duplicate fetches
+  const hasFetchedRef = useRef(false);
+
+  // Fetch on mount - SINGLE API CALL, runs only ONCE
   useEffect(() => {
-    let isMounted = true;
-    
-    const fetchOptions = async () => {
-      if (isMounted) {
-        await loadRideOptions();
-      }
-    };
+    // Prevent duplicate requests
+    if (hasFetchedRef.current) return;
+    hasFetchedRef.current = true;
 
-    fetchOptions();
+    loadRideOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    return () => {
-      isMounted = false;
-    };
+  // Retry function that resets the ref and fetches again
+  const handleRetry = useCallback(() => {
+    hasFetchedRef.current = false;
+    loadRideOptions();
   }, [loadRideOptions]);
 
   const [showPromoDetails, setShowPromoDetails] = useState(false);
@@ -532,7 +534,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
             <div className="flex flex-col items-center justify-center py-8">
               <p className="text-red-600 mb-4">{error}</p>
               <motion.button
-                onClick={loadRideOptions}
+                onClick={handleRetry}
                 className="flex items-center gap-2 px-4 py-2 bg-[#5B2EFF] text-white rounded-full font-medium"
                 whileTap={{ scale: 0.95 }}
               >
@@ -546,7 +548,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
               <p className="text-gray-600 text-center mb-2">No vehicles available nearby</p>
               <p className="text-gray-400 text-sm text-center mb-4">Try again in a moment</p>
               <motion.button
-                onClick={loadRideOptions}
+                onClick={handleRetry}
                 className="flex items-center gap-2 px-4 py-2 bg-[#5B2EFF] text-white rounded-full font-medium"
                 whileTap={{ scale: 0.95 }}
               >

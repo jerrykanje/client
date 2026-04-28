@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { MapBackground } from '../components/MapBackground';
 import { ScrollableSection } from '../components/ScrollableSection';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { getAddressSuggestions } from '../data/addressSuggestions';
+import { getAddressSuggestions, getCoordinatesForAddress, AddressSuggestion } from '../data/addressSuggestions';
 
 interface YourRouteProps {
   onRouteComplete?: (pickup: string, destination: string, stops: string[]) => void;
@@ -16,7 +16,7 @@ type ServiceType = 'ride' | 'package' | 'towing' | 'truck';
 export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { address: currentLocation, loading: locationLoading } = useGeolocation();
+  const { address: currentLocation, loading: locationLoading, latitude: geoLat, longitude: geoLng } = useGeolocation();
 
   const serviceType: ServiceType = location.state?.serviceType || 'ride';
 
@@ -25,8 +25,12 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const [stops, setStops] = useState<string[]>([]);
   const [activeField, setActiveField] = useState<'pickup' | 'destination' | number>('destination');
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState(getAddressSuggestions(''));
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>(getAddressSuggestions(''));
   const [extraOption, setExtraOption] = useState('');
+  
+  // Track coordinates for pickup and destination
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     if (currentLocation && !pickup) {
@@ -102,19 +106,28 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     }
   };
 
-  const handleSuggestionSelect = (address: string) => {
+  const handleSuggestionSelect = (suggestion: AddressSuggestion) => {
+    const address = suggestion.address;
+    const coords = suggestion.coords;
+    
     // CRITICAL: Capture fresh values BEFORE setting state
     // This fixes the double-tap bug where stale closure values were used
     let newPickup = pickup;
     let newDestination = destination;
     let newStops = [...stops];
+    let newPickupCoords = pickupCoords;
+    let newDestinationCoords = destinationCoords;
 
     if (activeField === 'pickup') {
       newPickup = address;
+      newPickupCoords = coords;
       setPickup(address);
+      setPickupCoords(coords);
     } else if (activeField === 'destination') {
       newDestination = address;
+      newDestinationCoords = coords;
       setDestination(address);
+      setDestinationCoords(coords);
     } else if (typeof activeField === 'number') {
       newStops[activeField] = address;
       setStops(newStops);
@@ -163,7 +176,9 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
           serviceType: 'ride',
           pickup: newPickup,
           destination: newDestination,
-          stops: newStops
+          stops: newStops,
+          pickupCoords: newPickupCoords,
+          destinationCoords: newDestinationCoords
         }
       });
     }
@@ -229,38 +244,6 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const handleLogisticsNavigate = () => {
     if (!pickup || !destination || !extraOption) return;
 
-    // Build API payload based on service type
-    let payload: any = {
-      pickup,
-      destination,
-      stops,
-      pickupLat: 0,
-      pickupLng: 0,
-      dropLat: 0,
-      dropLng: 0
-    };
-
-    if (serviceType === 'package') {
-      payload = {
-        ...payload,
-        serviceType: 'courier',
-        category: 'package',
-        kg: extraOption // e.g. "0-5kg"
-      };
-    } else if (serviceType === 'towing') {
-      payload = {
-        ...payload,
-        serviceType: 'towing',
-        vehicleType: extraOption // e.g. "SUV"
-      };
-    } else if (serviceType === 'truck') {
-      payload = {
-        ...payload,
-        serviceType: 'delivery_truck',
-        deliveryType: extraOption // e.g. "farm produce"
-      };
-    }
-
     // SelectRide page will handle the API call as the single source of truth
     onRouteComplete?.(pickup, destination, stops);
     navigate('/select-ride', {
@@ -269,7 +252,9 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
         pickup,
         destination,
         stops,
-        extraOption
+        extraOption,
+        pickupCoords,
+        destinationCoords
       }
     });
   };
@@ -493,7 +478,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
               {suggestions.map((suggestion, index) => (
                 <motion.button
                   key={suggestion.id}
-                  onClick={() => handleSuggestionSelect(suggestion.address)}
+                  onClick={() => handleSuggestionSelect(suggestion)}
                   className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -513,7 +498,12 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
               
               {/* My Location Option */}
               <motion.button
-                onClick={() => handleSuggestionSelect(currentLocation || 'Current Location')}
+                onClick={() => handleSuggestionSelect({
+                  id: 'current-location',
+                  address: currentLocation || 'Current Location',
+                  description: 'Your current location',
+                  coords: { lat: geoLat || -26.2041, lng: geoLng || 28.0473 }
+                })}
                 className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
