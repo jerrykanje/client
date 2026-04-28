@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, PanInfo, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { X, Plus, Calendar, Users, User, Briefcase, ChevronDown, RefreshCw } from 'lucide-react';
@@ -103,12 +103,19 @@ export const SelectRide: React.FC<SelectRideProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedRide, setSelectedRide] = useState<BackendRideOption | null>(null);
+  
+  // Ref to prevent duplicate fetches
+  const hasFetchedRef = useRef(false);
 
   // Promo discount (30%)
   const promoDiscount = 30;
 
   // Load ride options from backend - SINGLE API CALL
-  const loadRideOptions = useCallback(async () => {
+  const loadRideOptions = async (isRetry = false) => {
+    // Prevent duplicate requests unless it's a retry
+    if (hasFetchedRef.current && !isRetry) return;
+    hasFetchedRef.current = true;
+    
     setIsLoading(true);
     setError('');
 
@@ -156,24 +163,13 @@ export const SelectRide: React.FC<SelectRideProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [navPickup, pickup, navDestination, destination, navStops, stops, pickupCoords, destinationCoords, serviceType, extraOption]);
+  };
 
-  // Fetch on mount - SINGLE API CALL
+  // Fetch ONLY ONCE on mount - empty dependency array
   useEffect(() => {
-    let isMounted = true;
-    
-    const fetchOptions = async () => {
-      if (isMounted) {
-        await loadRideOptions();
-      }
-    };
-
-    fetchOptions();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [loadRideOptions]);
+    loadRideOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [showPromoDetails, setShowPromoDetails] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterTab>('recommended');
@@ -532,7 +528,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
             <div className="flex flex-col items-center justify-center py-8">
               <p className="text-red-600 mb-4">{error}</p>
               <motion.button
-                onClick={loadRideOptions}
+                onClick={() => loadRideOptions(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-[#5B2EFF] text-white rounded-full font-medium"
                 whileTap={{ scale: 0.95 }}
               >
@@ -546,7 +542,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
               <p className="text-gray-600 text-center mb-2">No vehicles available nearby</p>
               <p className="text-gray-400 text-sm text-center mb-4">Try again in a moment</p>
               <motion.button
-                onClick={loadRideOptions}
+                onClick={() => loadRideOptions(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-[#5B2EFF] text-white rounded-full font-medium"
                 whileTap={{ scale: 0.95 }}
               >

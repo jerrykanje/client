@@ -1,4 +1,4 @@
- import { CarType, RecentSearch } from '../types';
+import { CarType, RecentSearch } from '../types';
 
 export const carTypes: CarType[] = [
   {
@@ -47,30 +47,41 @@ export const carTypes: CarType[] = [
   }
 ];
 
-export const recentSearches: RecentSearch[] = [
+// Recent searches with Zambia/Lusaka locations and coordinates
+export const recentSearches: (RecentSearch & { lat?: number; lng?: number })[] = [
   {
     id: '1',
-    address: '78 Eastwood Street',
-    description: 'West Turffontein, Johannesburg'
+    address: 'East Park Mall',
+    description: 'Great East Road, Lusaka',
+    lat: -15.4061,
+    lng: 28.3307
   },
   {
     id: '2',
-    address: 'KFC Gandhi Square',
-    description: 'Umnutho House, Eloff Street, Marshalltown...'
+    address: 'Manda Hill Mall',
+    description: 'Manchichi Road, Lusaka',
+    lat: -15.3982,
+    lng: 28.3221
   },
   {
     id: '3',
-    address: 'Johannesburg Park Station',
-    description: 'Rissik Street, Johannesburg Central'
+    address: 'Kenneth Kaunda International Airport',
+    description: 'Airport Road, Lusaka',
+    lat: -15.3308,
+    lng: 28.4526
   },
   {
     id: '4',
-    address: 'Mall of Africa',
-    description: 'Lone Creek Crescent, Waterfall City'
+    address: 'Arcades Shopping Centre',
+    description: 'Great East Road, Lusaka',
+    lat: -15.4025,
+    lng: 28.3156
   },
   {
     id: '5',
-    address: 'OR Tambo International Airport',
-    description: 'O.R. Tambo Airport Rd, Kempton Park'
+    address: 'Cairo Road',
+    description: 'Central Business District, Lusaka',
+    lat: -15.4195,
+    lng: 28.2831
   }
 ];

@@ -1,5 +1,5 @@
-
 import { useState, useEffect } from 'react';
+import { locationService } from '../services/locationService';
 
 interface GeolocationState {
   latitude: number | null;
@@ -18,63 +18,38 @@ export const useGeolocation = () => {
     error: null
   });
 
-  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
-    // Mock reverse geocoding - in production, use Google Maps Geocoding API
-    const mockAddresses = [
-      '49 Cornwell Street, West Turffontein, Johannesburg',
-      '34 Beaumont Street, Marshalltown, Johannesburg',
-      '78 Eastwood Street, West Turffontein, Johannesburg',
-      '92 Beaumont Street, West Turffontein, Johannesburg'
-    ];
-    
-    return mockAddresses[Math.floor(Math.random() * mockAddresses.length)];
-  };
-
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setLocation(prev => ({
-        ...prev,
-        loading: false,
-        error: 'Geolocation is not supported by this browser'
-      }));
-      return;
-    }
+    let isMounted = true;
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
-        try {
-          const address = await reverseGeocode(latitude, longitude);
+    const fetchLocation = async () => {
+      try {
+        const result = await locationService.getCurrentLocation();
+        
+        if (isMounted) {
           setLocation({
-            latitude,
-            longitude,
-            address,
+            latitude: result.lat,
+            longitude: result.lng,
+            address: result.address,
             loading: false,
             error: null
           });
-        } catch (error) {
+        }
+      } catch (error) {
+        if (isMounted) {
           setLocation(prev => ({
             ...prev,
-            latitude,
-            longitude,
             loading: false,
-            error: 'Failed to get address'
+            error: error instanceof Error ? error.message : 'Failed to get location'
           }));
         }
-      },
-      (error) => {
-        setLocation(prev => ({
-          ...prev,
-          loading: false,
-          error: error.message
-        }));
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000
       }
-    );
+    };
+
+    fetchLocation();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   return location;

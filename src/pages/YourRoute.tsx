@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { MapBackground } from '../components/MapBackground';
 import { ScrollableSection } from '../components/ScrollableSection';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { getAddressSuggestions } from '../data/addressSuggestions';
+import { locationService, PlaceResult } from '../services/locationService';
 
 interface YourRouteProps {
   onRouteComplete?: (pickup: string, destination: string, stops: string[]) => void;
@@ -13,10 +13,15 @@ interface YourRouteProps {
 
 type ServiceType = 'ride' | 'package' | 'towing' | 'truck';
 
+interface Coords {
+  lat: number;
+  lng: number;
+}
+
 export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { address: currentLocation, loading: locationLoading } = useGeolocation();
+  const { address: currentLocation, latitude, longitude, loading: locationLoading } = useGeolocation();
 
   const serviceType: ServiceType = location.state?.serviceType || 'ride';
 
@@ -25,19 +30,32 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const [stops, setStops] = useState<string[]>([]);
   const [activeField, setActiveField] = useState<'pickup' | 'destination' | number>('destination');
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState(getAddressSuggestions(''));
+  const [suggestions, setSuggestions] = useState<PlaceResult[]>([]);
   const [extraOption, setExtraOption] = useState('');
+  
+  // Track coordinates for pickup and destination
+  const [pickupCoords, setPickupCoords] = useState<Coords | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
 
+  // Set pickup from geolocation when available
   useEffect(() => {
-    if (currentLocation && !pickup) {
+    if (currentLocation && !pickup && latitude && longitude) {
       setPickup(currentLocation);
+      setPickupCoords({ lat: latitude, lng: longitude });
     }
-  }, [currentLocation, pickup]);
+  }, [currentLocation, pickup, latitude, longitude]);
 
   useEffect(() => {
-    // Handle navigation state from SelectRide page
+    // Handle navigation state from SelectRide page or Dashboard
     if (location.state) {
-      const { highlightDestination, highlightAddStop, prefilledDestination, prefilledPickup } = location.state;
+      const { 
+        highlightDestination, 
+        highlightAddStop, 
+        prefilledDestination, 
+        prefilledPickup,
+        destinationCoords: navDestCoords,
+        pickupCoords: navPickupCoords
+      } = location.state;
       
       if (prefilledPickup) {
         setPickup(prefilledPickup);
@@ -45,6 +63,15 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       
       if (prefilledDestination) {
         setDestination(prefilledDestination);
+      }
+      
+      // Set coordinates if provided from navigation
+      if (navDestCoords) {
+        setDestinationCoords(navDestCoords);
+      }
+      
+      if (navPickupCoords) {
+        setPickupCoords(navPickupCoords);
       }
       
       if (highlightDestination) {
@@ -64,8 +91,22 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     }
   }, [location.state]);
 
+  // Load suggestions using locationService
   useEffect(() => {
-    setSuggestions(getAddressSuggestions(searchQuery));
+    let isMounted = true;
+    
+    const loadSuggestions = async () => {
+      const results = await locationService.searchPlaces(searchQuery);
+      if (isMounted) {
+        setSuggestions(results);
+      }
+    };
+    
+    loadSuggestions();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [searchQuery]);
 
   // Function to find the next empty field
@@ -91,6 +132,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     
     return hasPickup && hasDestination && allStopsFilled;
   };
+
   const handleFieldFocus = (field: 'pickup' | 'destination' | number) => {
     setActiveField(field);
     if (field === 'pickup') {
@@ -102,19 +144,28 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     }
   };
 
-  const handleSuggestionSelect = (address: string) => {
+  const handleSuggestionSelect = (place: PlaceResult) => {
+    const address = place.address;
+    const coords: Coords = { lat: place.lat, lng: place.lng };
+    
     // CRITICAL: Capture fresh values BEFORE setting state
     // This fixes the double-tap bug where stale closure values were used
     let newPickup = pickup;
     let newDestination = destination;
     let newStops = [...stops];
+    let newPickupCoords = pickupCoords;
+    let newDestinationCoords = destinationCoords;
 
     if (activeField === 'pickup') {
       newPickup = address;
+      newPickupCoords = coords;
       setPickup(address);
+      setPickupCoords(coords);
     } else if (activeField === 'destination') {
       newDestination = address;
+      newDestinationCoords = coords;
       setDestination(address);
+      setDestinationCoords(coords);
     } else if (typeof activeField === 'number') {
       newStops[activeField] = address;
       setStops(newStops);
@@ -163,7 +214,81 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
           serviceType: 'ride',
           pickup: newPickup,
           destination: newDestination,
-          stops: newStops
+          stops: newStops,
+          pickupCoords: newPickupCoords,
+          destinationCoords: newDestinationCoords
+        }
+      });
+    }
+  };
+
+  const handleMyLocationSelect = () => {
+    if (!currentLocation || !latitude || !longitude) return;
+    
+    const coords: Coords = { lat: latitude, lng: longitude };
+    
+    let newPickup = pickup;
+    let newDestination = destination;
+    let newStops = [...stops];
+    let newPickupCoords = pickupCoords;
+    let newDestinationCoords = destinationCoords;
+
+    if (activeField === 'pickup') {
+      newPickup = currentLocation;
+      newPickupCoords = coords;
+      setPickup(currentLocation);
+      setPickupCoords(coords);
+    } else if (activeField === 'destination') {
+      newDestination = currentLocation;
+      newDestinationCoords = coords;
+      setDestination(currentLocation);
+      setDestinationCoords(coords);
+    } else if (typeof activeField === 'number') {
+      newStops[activeField] = currentLocation;
+      setStops(newStops);
+    }
+
+    setSearchQuery('');
+
+    const checkFieldsFilled = (): boolean => {
+      const hasPickup = newPickup && newPickup.trim() !== '';
+      const hasDestination = newDestination && newDestination.trim() !== '';
+      const allStopsFilled = newStops.length === 0 || newStops.every(stop => stop && stop.trim() !== '');
+      return hasPickup && hasDestination && allStopsFilled;
+    };
+
+    const findNextEmptyField = (): 'pickup' | 'destination' | number | null => {
+      if (!newPickup) return 'pickup';
+      if (!newDestination) return 'destination';
+      for (let i = 0; i < newStops.length; i++) {
+        if (!newStops[i] || newStops[i].trim() === '') {
+          return i;
+        }
+      }
+      return null;
+    };
+
+    const nextField = findNextEmptyField();
+
+    if (nextField !== null) {
+      setActiveField(nextField);
+      if (nextField === 'pickup') {
+        setSearchQuery(newPickup);
+      } else if (nextField === 'destination') {
+        setSearchQuery(newDestination);
+      } else {
+        setSearchQuery(newStops[nextField] || '');
+      }
+    } else if (checkFieldsFilled() && serviceType === 'ride') {
+      onRouteComplete?.(newPickup, newDestination, newStops);
+      navigate('/select-ride', {
+        state: {
+          serviceType: 'ride',
+          pickup: newPickup,
+          destination: newDestination,
+          stops: newStops,
+          pickupCoords: newPickupCoords,
+          destinationCoords: newDestinationCoords
         }
       });
     }
@@ -192,8 +317,11 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const handleInputChange = (value: string) => {
     if (activeField === 'pickup') {
       setPickup(value);
+      // Clear coords when manually typing (they'll be set when selecting a suggestion)
+      if (pickupCoords) setPickupCoords(null);
     } else if (activeField === 'destination') {
       setDestination(value);
+      if (destinationCoords) setDestinationCoords(null);
     } else if (typeof activeField === 'number') {
       const newStops = [...stops];
       newStops[activeField] = value;
@@ -229,38 +357,6 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   const handleLogisticsNavigate = () => {
     if (!pickup || !destination || !extraOption) return;
 
-    // Build API payload based on service type
-    let payload: any = {
-      pickup,
-      destination,
-      stops,
-      pickupLat: 0,
-      pickupLng: 0,
-      dropLat: 0,
-      dropLng: 0
-    };
-
-    if (serviceType === 'package') {
-      payload = {
-        ...payload,
-        serviceType: 'courier',
-        category: 'package',
-        kg: extraOption // e.g. "0-5kg"
-      };
-    } else if (serviceType === 'towing') {
-      payload = {
-        ...payload,
-        serviceType: 'towing',
-        vehicleType: extraOption // e.g. "SUV"
-      };
-    } else if (serviceType === 'truck') {
-      payload = {
-        ...payload,
-        serviceType: 'delivery_truck',
-        deliveryType: extraOption // e.g. "farm produce"
-      };
-    }
-
     // SelectRide page will handle the API call as the single source of truth
     onRouteComplete?.(pickup, destination, stops);
     navigate('/select-ride', {
@@ -269,7 +365,9 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
         pickup,
         destination,
         stops,
-        extraOption
+        extraOption,
+        pickupCoords,
+        destinationCoords
       }
     });
   };
@@ -285,7 +383,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       transition={{ delay: 0.2 }}
       className="mt-6 p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl border border-orange-200"
     >
-      <label className="block text-sm font-semibold text-gray-900 mb-3">What's your vehicle?</label>
+      <label className="block text-sm font-semibold text-gray-900 mb-3">What&apos;s your vehicle?</label>
       <select
         value={extraOption}
         onChange={(e) => setExtraOption(e.target.value)}
@@ -308,7 +406,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       transition={{ delay: 0.2 }}
       className="mt-6 p-4 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl border border-gray-300"
     >
-      <label className="block text-sm font-semibold text-gray-900 mb-3">What's the weight of your package?</label>
+      <label className="block text-sm font-semibold text-gray-900 mb-3">What&apos;s the weight of your package?</label>
       <select
         value={extraOption}
         onChange={(e) => setExtraOption(e.target.value)}
@@ -403,6 +501,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
                 <button
                   onClick={() => {
                     setPickup('');
+                    setPickupCoords(null);
                     setSearchQuery('');
                   }}
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-gray-300 rounded-full flex items-center justify-center"
@@ -493,7 +592,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
               {suggestions.map((suggestion, index) => (
                 <motion.button
                   key={suggestion.id}
-                  onClick={() => handleSuggestionSelect(suggestion.address)}
+                  onClick={() => handleSuggestionSelect(suggestion)}
                   className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -513,7 +612,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
               
               {/* My Location Option */}
               <motion.button
-                onClick={() => handleSuggestionSelect(currentLocation || 'Current Location')}
+                onClick={handleMyLocationSelect}
                 className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}

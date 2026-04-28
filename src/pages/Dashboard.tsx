@@ -46,11 +46,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSearchSelect }) => {
     }
   };
 
-  const handleRecentAddressClick = (address: string) => {
+  const handleRecentAddressClick = (search: typeof recentSearches[0]) => {
     if (isRideActive || rideStatus === 'pending') {
       handleNavigationBlock(rideStatus === 'pending' ? '/waiting-for-driver' : '/driver-coming');
     } else {
-      onSearchSelect(address);
+      // Navigate to YourRoute with destination pre-filled including coordinates
+      navigate('/your-route', {
+        state: {
+          prefilledDestination: search.address,
+          highlightDestination: true,
+          destinationCoords: search.lat && search.lng ? { lat: search.lat, lng: search.lng } : null
+        }
+      });
     }
   };
 
@@ -180,7 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSearchSelect }) => {
                 {recentSearches.map((search, index) => (
                   <motion.button
                     key={search.id}
-                    onClick={() => handleRecentAddressClick(search.address)}
+                    onClick={() => handleRecentAddressClick(search)}
                     className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}

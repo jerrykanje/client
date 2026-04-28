@@ -1,34 +1,59 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, MapPin, Clock, Navigation, Search } from 'lucide-react';
+import { X, Plus, Clock, Navigation, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ScrollableSection } from '../components/ScrollableSection';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { getAddressSuggestions } from '../data/addressSuggestions';
+import { locationService, PlaceResult } from '../services/locationService';
+
+interface Coords {
+  lat: number;
+  lng: number;
+}
 
 export const ScheduleYourRoute: React.FC = () => {
   const navigate = useNavigate();
-  const { address: currentLocation, loading: locationLoading } = useGeolocation();
+  const { address: currentLocation, latitude, longitude, loading: locationLoading } = useGeolocation();
   
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
   const [stops, setStops] = useState<string[]>([]);
   const [activeField, setActiveField] = useState<'pickup' | 'destination' | number>('destination');
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState(getAddressSuggestions(''));
+  const [suggestions, setSuggestions] = useState<PlaceResult[]>([]);
+  
+  // Track coordinates for pickup and destination
+  const [pickupCoords, setPickupCoords] = useState<Coords | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
 
   useEffect(() => {
-    if (currentLocation && !pickup) {
+    if (currentLocation && !pickup && latitude && longitude) {
       setPickup(currentLocation);
+      setPickupCoords({ lat: latitude, lng: longitude });
     }
-  }, [currentLocation, pickup]);
+  }, [currentLocation, pickup, latitude, longitude]);
 
   useEffect(() => {
     // Auto-highlight destination field on component mount
     setActiveField('destination');
   }, []);
+
+  // Load suggestions using locationService
   useEffect(() => {
-    setSuggestions(getAddressSuggestions(searchQuery));
+    let isMounted = true;
+    
+    const loadSuggestions = async () => {
+      const results = await locationService.searchPlaces(searchQuery);
+      if (isMounted) {
+        setSuggestions(results);
+      }
+    };
+    
+    loadSuggestions();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [searchQuery]);
 
   // Function to find the next empty field
@@ -54,6 +79,7 @@ export const ScheduleYourRoute: React.FC = () => {
     
     return hasPickup && hasDestination && allStopsFilled;
   };
+
   const handleFieldFocus = (field: 'pickup' | 'destination' | number) => {
     setActiveField(field);
     if (field === 'pickup') {
@@ -65,44 +91,145 @@ export const ScheduleYourRoute: React.FC = () => {
     }
   };
 
-  const handleSuggestionSelect = (address: string) => {
+  const handleSuggestionSelect = (place: PlaceResult) => {
+    const address = place.address;
+    const coords: Coords = { lat: place.lat, lng: place.lng };
+    
+    let newPickup = pickup;
+    let newDestination = destination;
+    let newStops = [...stops];
+    let newPickupCoords = pickupCoords;
+    let newDestinationCoords = destinationCoords;
+
     if (activeField === 'pickup') {
+      newPickup = address;
+      newPickupCoords = coords;
       setPickup(address);
+      setPickupCoords(coords);
     } else if (activeField === 'destination') {
+      newDestination = address;
+      newDestinationCoords = coords;
       setDestination(address);
+      setDestinationCoords(coords);
     } else if (typeof activeField === 'number') {
-      const newStops = [...stops];
       newStops[activeField] = address;
       setStops(newStops);
     }
     
     setSearchQuery('');
     
-    // Auto-navigate to next empty field or complete the route
-    setTimeout(() => {
-      const nextField = getNextEmptyField();
-      
-      if (nextField !== null) {
-        // Move to next empty field
-        setActiveField(nextField);
-        if (nextField === 'pickup') {
-          setSearchQuery(pickup);
-        } else if (nextField === 'destination') {
-          setSearchQuery(destination);
-        } else {
-          setSearchQuery(stops[nextField] || '');
+    // Check completion using fresh values
+    const checkFieldsFilled = (): boolean => {
+      const hasPickup = newPickup && newPickup.trim() !== '';
+      const hasDestination = newDestination && newDestination.trim() !== '';
+      const allStopsFilled = newStops.length === 0 || newStops.every(stop => stop && stop.trim() !== '');
+      return hasPickup && hasDestination && allStopsFilled;
+    };
+
+    const findNextEmptyField = (): 'pickup' | 'destination' | number | null => {
+      if (!newPickup) return 'pickup';
+      if (!newDestination) return 'destination';
+      for (let i = 0; i < newStops.length; i++) {
+        if (!newStops[i] || newStops[i].trim() === '') {
+          return i;
         }
-      } else if (areAllFieldsFilled()) {
-        // All fields filled, navigate to schedule confirm (payment method)
-        navigate('/schedule-confirm', {
-          state: {
-            pickup,
-            destination,
-            stops
-          }
-        });
       }
-    }, 100);
+      return null;
+    };
+
+    const nextField = findNextEmptyField();
+    
+    if (nextField !== null) {
+      setActiveField(nextField);
+      if (nextField === 'pickup') {
+        setSearchQuery(newPickup);
+      } else if (nextField === 'destination') {
+        setSearchQuery(newDestination);
+      } else {
+        setSearchQuery(newStops[nextField] || '');
+      }
+    } else if (checkFieldsFilled()) {
+      // All fields filled, navigate to schedule confirm with coordinates
+      navigate('/schedule-confirm', {
+        state: {
+          pickup: newPickup,
+          destination: newDestination,
+          stops: newStops,
+          pickupCoords: newPickupCoords,
+          destinationCoords: newDestinationCoords
+        }
+      });
+    }
+  };
+
+  const handleMyLocationSelect = () => {
+    if (!currentLocation || !latitude || !longitude) return;
+    
+    const coords: Coords = { lat: latitude, lng: longitude };
+    
+    let newPickup = pickup;
+    let newDestination = destination;
+    let newStops = [...stops];
+    let newPickupCoords = pickupCoords;
+    let newDestinationCoords = destinationCoords;
+
+    if (activeField === 'pickup') {
+      newPickup = currentLocation;
+      newPickupCoords = coords;
+      setPickup(currentLocation);
+      setPickupCoords(coords);
+    } else if (activeField === 'destination') {
+      newDestination = currentLocation;
+      newDestinationCoords = coords;
+      setDestination(currentLocation);
+      setDestinationCoords(coords);
+    } else if (typeof activeField === 'number') {
+      newStops[activeField] = currentLocation;
+      setStops(newStops);
+    }
+
+    setSearchQuery('');
+
+    const checkFieldsFilled = (): boolean => {
+      const hasPickup = newPickup && newPickup.trim() !== '';
+      const hasDestination = newDestination && newDestination.trim() !== '';
+      const allStopsFilled = newStops.length === 0 || newStops.every(stop => stop && stop.trim() !== '');
+      return hasPickup && hasDestination && allStopsFilled;
+    };
+
+    const findNextEmptyField = (): 'pickup' | 'destination' | number | null => {
+      if (!newPickup) return 'pickup';
+      if (!newDestination) return 'destination';
+      for (let i = 0; i < newStops.length; i++) {
+        if (!newStops[i] || newStops[i].trim() === '') {
+          return i;
+        }
+      }
+      return null;
+    };
+
+    const nextField = findNextEmptyField();
+
+    if (nextField !== null) {
+      setActiveField(nextField);
+      if (nextField === 'pickup') {
+        setSearchQuery(newPickup);
+      } else if (nextField === 'destination') {
+        setSearchQuery(newDestination);
+      } else {
+        setSearchQuery(newStops[nextField] || '');
+      }
+    } else if (checkFieldsFilled()) {
+      navigate('/schedule-confirm', {
+        state: {
+          pickup: newPickup,
+          destination: newDestination,
+          stops: newStops,
+          pickupCoords: newPickupCoords,
+          destinationCoords: newDestinationCoords
+        }
+      });
+    }
   };
 
   const handleAddStop = () => {
@@ -128,8 +255,10 @@ export const ScheduleYourRoute: React.FC = () => {
   const handleInputChange = (value: string) => {
     if (activeField === 'pickup') {
       setPickup(value);
+      if (pickupCoords) setPickupCoords(null);
     } else if (activeField === 'destination') {
       setDestination(value);
+      if (destinationCoords) setDestinationCoords(null);
     } else if (typeof activeField === 'number') {
       const newStops = [...stops];
       newStops[activeField] = value;
@@ -149,6 +278,7 @@ export const ScheduleYourRoute: React.FC = () => {
   const isFieldActive = (field: 'pickup' | 'destination' | number): boolean => {
     return activeField === field;
   };
+
   return (
     <motion.div 
       className="min-h-screen bg-gray-50"
@@ -203,6 +333,7 @@ export const ScheduleYourRoute: React.FC = () => {
               <button
                 onClick={() => {
                   setPickup('');
+                  setPickupCoords(null);
                   setSearchQuery('');
                 }}
                 className="absolute right-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-gray-300 rounded-full flex items-center justify-center"
@@ -289,7 +420,7 @@ export const ScheduleYourRoute: React.FC = () => {
             {suggestions.map((suggestion, index) => (
               <motion.button
                 key={suggestion.id}
-                onClick={() => handleSuggestionSelect(suggestion.address)}
+                onClick={() => handleSuggestionSelect(suggestion)}
                 className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -309,7 +440,7 @@ export const ScheduleYourRoute: React.FC = () => {
             
             {/* My Location Option */}
             <motion.button
-              onClick={() => handleSuggestionSelect(currentLocation || 'Current Location')}
+              onClick={handleMyLocationSelect}
               className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
