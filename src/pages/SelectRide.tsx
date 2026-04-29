@@ -112,15 +112,19 @@ export const SelectRide: React.FC<SelectRideProps> = ({
     setIsLoading(true);
     setError('');
 
+    // Fallback coordinates near available drivers (Johannesburg area)
+    const fallbackPickup = { lat: -26.2371500, lng: 28.0305200 };
+    const fallbackDrop = { lat: -26.2400000, lng: 28.0400000 };
+
     try {
       const payload: Record<string, unknown> = {
         pickup: navPickup || pickup,
         destination: navDestination || destination,
         stops: navStops.length > 0 ? navStops : stops,
-        pickupLat: pickupCoords?.lat || 0,
-        pickupLng: pickupCoords?.lng || 0,
-        dropLat: destinationCoords?.lat || 0,
-        dropLng: destinationCoords?.lng || 0
+        pickupLat: pickupCoords?.lat ?? fallbackPickup.lat,
+        pickupLng: pickupCoords?.lng ?? fallbackPickup.lng,
+        dropLat: destinationCoords?.lat ?? fallbackDrop.lat,
+        dropLng: destinationCoords?.lng ?? fallbackDrop.lng
       };
 
       if (serviceType === 'ride') {
@@ -137,7 +141,12 @@ export const SelectRide: React.FC<SelectRideProps> = ({
         payload.deliveryType = extraOption || 'farm produce';
       }
 
+      console.log('[v0] Sending ride payload:', payload);
+
       const response = await apiPost<{ data?: BackendRideOption[] }>('/getRideOptions', payload);
+      
+      console.log('[v0] Ride options response:', response);
+      
       const options = response.data || response || [];
       
       // Handle array response directly or wrapped in data property
@@ -289,7 +298,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
             name: selectedRide.title,
             estimatedPrice: discountedPrice,
             originalPrice: selectedRide.price,
-            eta: `${Math.round(selectedRide.eta / 60)} min`,
+            eta: `${selectedRide.eta} min`,
             vehicleCategory: selectedRide.category,
             seats: selectedRide.seats
           },
@@ -308,11 +317,10 @@ export const SelectRide: React.FC<SelectRideProps> = ({
     return RIDE_ICONS[category] || RIDE_ICONS['economy'] || { image: '/cars/economy.png', color: 'bg-gray-100' };
   };
 
-  // Format ETA from seconds to minutes
-  const formatEta = (etaSeconds: number, enabled: boolean): string => {
+  // Format ETA - backend already returns minutes
+  const formatEta = (etaMinutes: number, enabled: boolean): string => {
     if (!enabled) return 'No drivers';
-    const minutes = Math.round(etaSeconds / 60);
-    return `${minutes} min`;
+    return `${etaMinutes} min`;
   };
 
   // Calculate discounted price
@@ -359,7 +367,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
           {isLoading 
             ? 'Finding drivers...'
             : selectedRide?.enabled 
-              ? `Arrive in ~${Math.round(selectedRide.eta / 60) + 15} min`
+              ? `Arrive in ~${selectedRide.eta + 15} min`
               : 'Searching for drivers...'}
         </motion.div>
       </div>
